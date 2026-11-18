@@ -1,12 +1,9 @@
+# Runtime dependencies (also what Vercel installs). Keep this list small.
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 pillow>=10.0
 numpy>=1.26
-pandas>=2.1
-scikit-learn>=1.4
-joblib>=1.3
-# tests
-pytest>=8.0
-httpx>=0.27
-# optional real material model: pip install ultralytics  (see TRAINING.md)
+# runs the trained models from weights/*.onnx (see onnx_models.py)
+onnxruntime>=1.18
+# Locally you can instead run the .pt models: pip install ultralytics  (see TRAINING.md)

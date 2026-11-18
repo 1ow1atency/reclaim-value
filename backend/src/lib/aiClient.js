@@ -36,7 +36,7 @@ async function call(path, { method = 'POST', body, json, timeoutMs = 5000 } = {}
 
 async function health() {
   try {
-    return { reachable: true, ...(await call('/health', { method: 'GET', timeoutMs: 2500 })) };
+    return { reachable: true, ...(await call('/health', { method: 'GET', timeoutMs: 8000 })) };
   } catch (err) {
     return { reachable: false, error: err.message };
   }
@@ -47,7 +47,7 @@ async function analyze({ buffer, filename, mimetype, quantityKg, distanceKm }) {
   form.append('file', new Blob([buffer], { type: mimetype }), filename || 'photo.jpg');
   form.append('quantity_kg', String(quantityKg || 100));
   form.append('distance_km', String(distanceKm ?? 10));
-  return call('/analyze', { body: form, timeoutMs: 30000 });
+  return call('/analyze', { body: form, timeoutMs: 60000 }); // allows for a cold start on serverless hosts
 }
 
 async function withFallback(fn, fallback) {

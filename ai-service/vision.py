@@ -91,15 +91,29 @@ class DetectorState:
         }
 
 
-_state = DetectorState()
+_INITIAL = DetectorState()
+_state = _INITIAL  # replaced by load_detector(); loaded lazily if start-up hooks don't run (serverless)
+
+
+def _ultralytics_available() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("ultralytics") is not None
 
 
 def _resolve(env_name: str, default_file: str, explicit: str | None) -> str | None:
-    """Explicit arg > env var > default file in weights/. An empty string disables the model."""
+    """Explicit arg > env var > default file in weights/. An empty string disables the model.
+
+    By default ``<name>.pt`` is used when ultralytics is installed; otherwise (or when
+    there is no .pt) ``<name>.onnx`` is used with onnxruntime.
+    """
     value = explicit if explicit is not None else os.getenv(env_name)
     if value is None:
-        candidate = os.path.join(HERE, "weights", default_file)
-        return candidate if os.path.isfile(candidate) else None
+        pt = os.path.join(HERE, "weights", default_file)
+        onnx = os.path.splitext(pt)[0] + ".onnx"
+        if os.path.isfile(pt) and (_ultralytics_available() or not os.path.isfile(onnx)):
+            return pt
+        return onnx if os.path.isfile(onnx) else None
     return value or None
 
 
@@ -111,12 +125,18 @@ def _load_slot(path: str | None) -> ModelSlot:
         slot.error = f"weights file not found: {path}"
         return slot
     try:
-        from ultralytics import YOLO  # type: ignore
+        if path.lower().endswith(".onnx"):
+            from onnx_models import OnnxYolo
 
-        slot.model = YOLO(path)
+            slot.model = OnnxYolo(path)
+        else:
+            from ultralytics import YOLO  # type: ignore
+
+            slot.model = YOLO(path)
         slot.loaded = True
-    except ImportError:
-        slot.error = "ultralytics is not installed (pip install ultralytics)"
+    except ImportError as exc:
+        slot.error = (f"onnxruntime is not installed (pip install onnxruntime): {exc}" if path.lower().endswith(".onnx")
+                      else "ultralytics is not installed (pip install ultralytics)")
     except Exception as exc:  # pragma: no cover - depends on the weights file
         slot.error = f"could not load weights: {exc}"
     return slot
@@ -144,6 +164,8 @@ def load_detector(weights: str | None = None, cls_weights: str | None = None) ->
 
 
 def detector_state() -> DetectorState:
+    if _state is _INITIAL:
+        load_detector()
     return _state
 
 
@@ -306,17 +328,27 @@ def combine(det: dict | None, cls: dict | None) -> tuple[dict[str, float], str |
     return scores, None if scores else "no material detected"
 
 
+def _is_onnx(model) -> bool:
+    return type(model).__name__ == "OnnxYolo"
+
+
 def _run_models(img: Image.Image) -> tuple[dict | None, dict | None]:
-    st = _state
+    st = detector_state()
     det = cls = None
-    if st.detector.loaded:
+    if st.detector.loaded and _is_onnx(st.detector.model):
+        m = st.detector.model
+        det = aggregate_detections(m.detect(img, DET_FLOOR), m.names, img.width, img.height, st.thresholds)  # type: ignore[union-attr]
+    elif st.detector.loaded:
         r = st.detector.model(img, conf=DET_FLOOR, verbose=False)[0]  # type: ignore[operator]
         boxes = []
         if r.boxes is not None and len(r.boxes):
             for c, conf, xyxy in zip(r.boxes.cls.tolist(), r.boxes.conf.tolist(), r.boxes.xyxy.tolist()):
                 boxes.append((c, conf, *xyxy))
         det = aggregate_detections(boxes, r.names, img.width, img.height, st.thresholds)
-    if st.classifier.loaded:
+    if st.classifier.loaded and _is_onnx(st.classifier.model):
+        m = st.classifier.model
+        cls = classifier_probs(m.classify(img), m.names)  # type: ignore[union-attr]
+    elif st.classifier.loaded:
         r = st.classifier.model(img, verbose=False)[0]  # type: ignore[operator]
         if getattr(r, "probs", None) is not None:
             cls = classifier_probs(r.probs.data.tolist(), r.names)
@@ -326,7 +358,7 @@ def _run_models(img: Image.Image) -> tuple[dict | None, dict | None]:
 def analyze_image(data: bytes) -> dict:
     img = open_image(data)
     f = _features(img)
-    st = _state
+    st = detector_state()
 
     material: str | None = None
     conf = 0.0

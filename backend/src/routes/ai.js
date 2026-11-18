@@ -2,7 +2,7 @@ const express = require('express');
 const ai = require('../lib/aiClient');
 const gemini = require('../lib/gemini');
 const config = require('../config');
-const { saveImage, usesCloudinary } = require('../lib/storage');
+const { saveImage, storageMode } = require('../lib/storage');
 const { runAgent } = require('../lib/agent');
 const { MATERIALS, conditionLabel } = require('../lib/catalog');
 const {
@@ -16,7 +16,7 @@ router.get('/status', async (_req, res) => {
   res.json({
     aiService: await ai.health(),
     gemini: { configured: gemini.isConfigured(), model: config.gemini.model },
-    storage: usesCloudinary() ? 'cloudinary' : 'local',
+    storage: storageMode(),
   });
 });
 
@@ -26,7 +26,7 @@ router.post('/analyze', requireRole('Company'), upload.single('image'), async (r
   if (!req.file) throw new HttpError(400, 'Attach a photo (field name "image")');
   const quantityKg = num(req.body.quantityKg, { name: 'Quantity (kg)', min: 0.1, max: 1e7 }) || 100;
   const distanceKm = num(req.body.distanceKm, { name: 'Distance', min: 0, max: 5000 }) ?? 10;
-  const imageUrl = await saveImage(req.file.buffer, req.file.mimetype);
+  const imageUrl = await saveImage(req.file.buffer, req.file.mimetype, req.user._id);
   try {
     const analysis = await ai.analyze({
       buffer: req.file.buffer, filename: req.file.originalname, mimetype: req.file.mimetype, quantityKg, distanceKm,

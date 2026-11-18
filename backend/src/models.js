@@ -126,6 +126,15 @@ const notificationSchema = new Schema({
 }, { timestamps: true });
 notificationSchema.index({ user: 1, createdAt: -1 });
 
+// Uploaded photos when no Cloudinary account is set up and the host has no
+// lasting disk (Render free, Vercel). Photos are shrunk in the browser first.
+const imageSchema = new Schema({
+  data: { type: Buffer, required: true },
+  contentType: { type: String, required: true },
+  size: Number,
+  owner: { type: Schema.Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+
 module.exports = {
   ROLES,
   STATUSES,
@@ -135,4 +144,5 @@ module.exports = {
   Request: mongoose.model('Request', requestSchema),
   Wanted: mongoose.model('Wanted', wantedSchema),
   Notification: mongoose.model('Notification', notificationSchema),
+  StoredImage: mongoose.model('StoredImage', imageSchema),
 };

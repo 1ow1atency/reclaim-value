@@ -83,3 +83,33 @@ python train_price.py trades.csv        # saves weights/price_model.joblib only 
 ```
 
 `seed_synthetic_trades.py` makes **synthetic** trades to test the pipeline. Never present a model trained on them as real.
+
+## Model v2 (class balance, CODD, better "other")
+
+Testing v1 on web photos showed that the whole-photo classifier falls back to **Timber** when it is
+unsure, because wood dominates the training data. `training/train_v2_colab.ipynb`:
+
+- adds CODD (tiles) and extra glass data;
+- builds "other" examples with `extract_negatives.py` (plastic, foam, cardboard, plasterboard);
+- balances the classifier's train split with `balance_cls.py`;
+- compares v1 and v2 on your own web-photo folder `MyDrive/reclaim_web_test/<class>/`.
+
+By default it retrains only the classifier (about 1 hour) and reuses the v1 detector.
+
+## Hosting the models without PyTorch (ONNX)
+
+For hosts with little memory or size limits (e.g. Vercel), export the models to ONNX:
+
+```bash
+pip install onnx onnxslim onnxruntime
+python training/export_onnx.py --check ~/Desktop/reclaim_web_test
+```
+
+This writes `weights/materials.onnx` and `weights/materials_cls.onnx`. `vision.py` uses them through onnxruntime (`onnx_models.py`) whenever ultralytics isn't installed or there is no `.pt` file.
+
+The pre- and post-processing reproduces ultralytics:
+
+- **Detector:** letterbox, class-aware NMS, boxes scaled back to the photo.
+- **Classifier:** resize, centre-crop.
+
+On test models the boxes matched with IoU ≥ 0.999 and the classifier probabilities matched to 4 decimal places. `--check` repeats that comparison on your own photos.

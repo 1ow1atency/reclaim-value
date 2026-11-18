@@ -1,0 +1,8 @@
+{
+  "steel": 0.306,
+  "concrete": 0.37,
+  "brick": 0.5,
+  "wood": 0.428,
+  "tiles": 0.5,
+  "glass": 0.305
+}

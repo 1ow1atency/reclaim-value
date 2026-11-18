@@ -13,6 +13,8 @@ const { CITIES } = require('./lib/geo');
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  // Render and Vercel sit behind one proxy: needed for correct client IPs in rate limiting
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) app.set('trust proxy', 1);
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
@@ -37,6 +39,7 @@ function createApp() {
     roles: ['Company', 'Buyer', 'Recycler'],
   }));
 
+  app.use('/api/images', require('./routes/images'));
   app.use('/api/auth', require('./routes/auth'));
   app.use('/api/materials', require('./routes/materials'));
   app.use('/api/ai', require('./routes/ai'));

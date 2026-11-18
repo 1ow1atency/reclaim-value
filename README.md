@@ -11,6 +11,10 @@ Site managers photograph salvageable material. The AI suggests the material type
 | AI microservice | Python, FastAPI: vision (YOLO or demo heuristic), price model, salvage recommender, NLP parser and agent intents | `ai-service/` | 8000 |
 | Data | MongoDB (local or Atlas); images on local disk or Cloudinary | | |
 
+## Deploying
+
+The whole app runs free on Vercel: the website and API as one project, and the AI service (trained models exported to ONNX) as another, with data in MongoDB Atlas. Steps are in [DEPLOY.md](DEPLOY.md).
+
 ## Requirements
 
 - Node.js 20 or newer
@@ -99,7 +103,7 @@ db.users.updateOne({ email: "you@example.com" }, { $set: { role: "Admin" } })
 ## Tests
 
 ```bash
-cd ai-service && pytest                      # vision (incl. trained-model voting), price, recommender, NLP, API, training
+cd ai-service && pip install -r requirements-dev.txt && pytest   # vision (incl. trained-model voting, ONNX helpers), price, recommender, NLP, API
 cd backend && npm test                       # unit tests; the API flow test is skipped without a DB
 MONGO_TEST_URI=mongodb://127.0.0.1:27017/reclaim_test npm test   # + full API flow (wipes that DB)
 cd frontend && npm run build

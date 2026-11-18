@@ -1,4 +1,4 @@
-// Image storage: Cloudinary when configured, local disk otherwise.
+// Image storage: Cloudinary when configured; otherwise MongoDB (hosted) or local disk (dev).
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
@@ -28,12 +28,21 @@ async function uploadCloudinary(buffer, mimetype) {
   return data.secure_url;
 }
 
-async function saveImage(buffer, mimetype) {
+const storageMode = () => (usesCloudinary() ? 'cloudinary' : config.imageStore === 'db' ? 'db' : 'local');
+
+async function saveImage(buffer, mimetype, owner) {
   if (usesCloudinary()) return uploadCloudinary(buffer, mimetype);
+  if (config.imageStore === 'db') {
+    const { StoredImage } = require('../models');
+    const img = await StoredImage.create({ data: buffer, contentType: mimetype, size: buffer.length, owner });
+    return `/api/images/${img._id}`;
+  }
   await fs.mkdir(config.uploadDir, { recursive: true });
   const name = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${EXT[mimetype] || '.jpg'}`;
   await fs.writeFile(path.join(config.uploadDir, name), buffer);
   return `/uploads/${name}`;
 }
 
-module.exports = { saveImage, usesCloudinary, ALLOWED_TYPES: Object.keys(EXT) };
+module.exports = {
+  saveImage, usesCloudinary, storageMode, ALLOWED_TYPES: Object.keys(EXT),
+};

@@ -1,94 +1,91 @@
-# Deploying Reclaim Value (free)
+# Deploying Reclaim Value (free, on Vercel)
 
-The online version runs the website and API as **one free Render web service**, with data in a **free MongoDB Atlas** cluster.
+Everything runs on Vercel's free **Hobby** plan, as two projects built from the same GitHub repository. Data lives in a free **MongoDB Atlas** cluster.
 
-The Python AI service (YOLO models) is **not** deployed, because it needs 1–2 GB of memory and free hosts give about 512 MB. Online:
+| Vercel project | Root Directory | What it runs |
+|---|---|---|
+| `reclaim-value-ai` | `ai-service` | FastAPI AI service. The trained models run from `weights/*.onnx` with onnxruntime (no PyTorch). |
+| `reclaim-value` | *(repository root)* | The React website (static) and the Express API as one function (`api/index.js`). |
 
-- The Capture page says "Photo recognition isn't available in this online version", and the user picks the material by hand.
-- Price estimates, salvage recommendations and natural-language search use the backend's built-in rules.
-- Everything else works as it does locally: marketplace, requests, Wanted alerts and notifications, impact dashboard and admin.
+How it fits together:
 
-To show the trained model, run the app locally (see README).
-
-Free-tier behaviour to know:
-
-- **The site sleeps after 15 minutes without visitors.** The next visit takes about a minute to wake it.
-- **Render's disk is wiped when the site sleeps or redeploys,** so uploaded photos disappear. To keep them, add a free Cloudinary account (step 5).
+- **Photos** are shrunk in the browser to 1600 px before upload. Vercel caps a request at 4.5 MB.
+- **Uploaded photos** are stored in MongoDB and served from `/api/images/:id`, because Vercel has no lasting disk. Set the Cloudinary variables to use Cloudinary instead.
+- **Region:** both projects run in Mumbai (`bom1`, set in `vercel.json`), next to the Atlas cluster.
+- **Cold start:** after a period of no use, the first photo takes a few seconds longer while the AI function starts.
+- **Plan terms:** the Hobby plan is for non-commercial use.
 
 ## 1. Database: MongoDB Atlas (free M0)
 
-1. Sign up at <https://www.mongodb.com/cloud/atlas/register>.
-2. Create a cluster: choose **M0 / Free** and a region near you (e.g. Mumbai).
-3. Create the database user:
-   - Go to **Database Access → Add new database user**.
-   - Use password authentication and click **Autogenerate** for the password.
-   - Copy the password and keep it safe.
-4. Allow Render to connect: **Network Access → Add IP address → Allow access from anywhere** (`0.0.0.0/0`). Render's free plan has no fixed IP address.
-5. Get the connection string:
-   - Go to **Clusters → Connect → Drivers** and copy the string.
-   - Replace `<db_password>` with the password.
-   - Add the database name before the `?`: `...mongodb.net/reclaim_value?retryWrites=true...`
-6. Optional: load the demo accounts and sample listings from your computer:
+1. Create an **M0 / Free** cluster, preferably in Mumbai.
+2. Create a **database user** (Database & Network Access → Database Users).
+3. Under **IP Access List**, add `0.0.0.0/0`, because Vercel has no fixed IP addresses.
+4. Build the connection string:
+   - Go to **Connect → Drivers** and copy the string.
+   - Insert the password in place of `<db_password>`.
+   - Add the database name after `.mongodb.net/`, for example `mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/reclaim_value`.
+5. Optional: load the demo accounts and listings from `backend/`:
 
    ```bash
-   cd backend
-   MONGO_URI="paste-the-connection-string" npm run seed:demo
+   MONGO_URI="..." npm run seed:demo
    ```
 
-## 2. Code on GitHub
+## 2. Export the trained models to ONNX (once, on the machine with the .pt files)
 
 ```bash
-brew install gh            # once
-gh auth login              # GitHub.com → HTTPS → Login with a web browser
-cd reclaim-value
-git init
-git add .
-git ls-files | grep -E '(^|/)\.env$|\.pt$'   # must print nothing
-git commit -m "Reclaim Value"
-gh repo create reclaim-value --private --source=. --push
+cd ai-service && source .venv/bin/activate
+pip install onnx onnxslim onnxruntime
+python training/export_onnx.py --check ~/Desktop/reclaim_web_test   # the folder is optional
 ```
 
-`.gitignore` already excludes `.env`, model weights, `node_modules`, uploads and training data.
+This writes `weights/materials.onnx` and `weights/materials_cls.onnx`. The `--check` option runs every photo through the app's own code with both the `.pt` and the `.onnx` models, and reports whether the answers match.
 
-## 3. Website and API: Render (free web service)
+`.gitignore` lets the `.onnx` files and `materials_thresholds.json` into Git; the `.pt` files stay local. Commit and push.
 
-1. Sign up at <https://render.com> with GitHub.
-2. Choose **New → Web Service** and pick the `reclaim-value` repository.
-3. Fill in the settings:
+## 3. Vercel project 1: the AI service
 
-   | Setting | Value |
-   |---|---|
-   | Language | Node |
-   | Root Directory | *(empty)* |
-   | Build Command | `cd frontend && npm ci --include=dev && npm run build && cd ../backend && npm ci --omit=dev` |
-   | Start Command | `cd backend && npm start` |
-   | Instance Type | Free |
+1. At <https://vercel.com>, sign up with GitHub. Then go to **Add New → Project** and import the repository.
+2. Set **Project Name** to `reclaim-value-ai` and **Root Directory** to `ai-service`. The Framework Preset should become **FastAPI**.
+3. Click **Deploy**.
+4. Open `https://<your-ai-project>.vercel.app/health`:
+   - `material_model.mode` must be `"trained"`.
+   - Both `loaded` values must be `true`.
 
-4. Add these environment variables:
+## 4. Vercel project 2: website and API
+
+1. Go to **Add New → Project** and import the **same** repository again.
+2. Set **Project Name** to `reclaim-value` and leave **Root Directory** at the repository root. The Framework Preset should be **Other**; `vercel.json` sets the build.
+3. Add the environment variables:
 
    | Key | Value |
    |---|---|
    | `NODE_ENV` | `production` |
-   | `NODE_VERSION` | `22` |
-   | `MONGO_URI` | the Atlas connection string from step 1 |
-   | `JWT_SECRET` | a long random string (Render's **Generate** button) |
-   | `AI_SERVICE_URL` | `off` |
+   | `MONGO_URI` | the Atlas connection string |
+   | `JWT_SECRET` | a long random string, e.g. from `openssl rand -hex 32` |
+   | `AI_SERVICE_URL` | `https://<your-ai-project>.vercel.app` (no trailing slash) |
 
-5. Under **Advanced**, set **Health Check Path** to `/api/health`.
-6. Choose **Deploy**. The first build takes about 5 minutes. The site is then live at `https://<name>.onrender.com`.
+4. Click **Deploy**, then open `https://<your-project>.vercel.app`.
 
-The Express server serves the built website from `frontend/dist`, so there is one URL and CORS does not need setting up.
+Use the project's main `.vercel.app` domain for `AI_SERVICE_URL`. Per-deployment URLs (with a random suffix) may be behind Vercel's login protection.
 
-## 4. Updating
+## Updating
 
-Push to GitHub and Render redeploys automatically:
+Run `git add . && git commit -m "Update" && git push`, and both projects redeploy automatically.
 
-```bash
-git add . && git commit -m "Update" && git push
-```
+## Optional
 
-## 5. Optional extras
-
-- **Keep uploaded photos:** create a free Cloudinary account. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` to the Render environment variables.
-- **Gemini for general assistant questions:** add `GEMINI_API_KEY` (and `GEMINI_MODEL`).
+- **Cloudinary for photos:** set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET`.
+- **Gemini for general assistant questions:** set `GEMINI_API_KEY`.
 - **Admin account:** register normally, then in Atlas open **Browse Collections → users** and set your user's `role` to `Admin`.
+
+## Alternative: Render (website and API only)
+
+Render's free web service has 512 MB of memory, which is too little for the AI models. Set it up as follows:
+
+| Setting | Value |
+|---|---|
+| Build Command | `cd frontend && npm ci --include=dev && npm run build && cd ../backend && npm ci --omit=dev` |
+| Start Command | `cd backend && npm start` |
+| Health Check Path | `/api/health` |
+| Environment variables | `NODE_ENV=production`, `NODE_VERSION=22`, `MONGO_URI`, `JWT_SECRET` |
+| `AI_SERVICE_URL` | `off`, or the AI project's Vercel URL to get photo recognition |

@@ -6,6 +6,25 @@ import { MATERIAL_NAMES, SalvageTag, Swatch } from '../components/MaterialTag';
 import { Button, ErrorNote, Field, PageHeader, useToast } from '../components/ui';
 
 const ACTIONS = ['Reuse', 'Sell', 'Recycle', 'Dispose'];
+const MAX_SIDE = 1600; // plenty for the models (they look at 640 px); keeps uploads small
+
+// Shrink big phone photos before upload: faster, and hosted functions cap request size.
+// Falls back to the original file if the browser can't decode it (e.g. some HEIC files).
+async function shrinkPhoto(file) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 1.5e6) return file;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    return blob ? new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+  } catch {
+    return file;
+  }
+}
 
 function ScoreBars({ scores, chosen }) {
   const entries = ACTIONS.filter((a) => scores?.[a] != null);
@@ -39,7 +58,7 @@ export default function Capture() {
   const [aiNote, setAiNote] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [imageUrl, setImageUrl] = useState(null);
-  const [form, setForm] = useState({ title: '', materialType: 'steel', conditionScore: 70, notes: '' });
+  const [form, setForm] = useState({ title: '', materialType: '', conditionScore: 70, notes: '' });
   const [estimate, setEstimate] = useState(null);
 
   useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview]);
@@ -56,7 +75,7 @@ export default function Capture() {
     setBusy(true);
     setError('');
     const body = new FormData();
-    body.append('image', file);
+    body.append('image', await shrinkPhoto(file));
     body.append('quantityKg', quantityKg || '100');
     try {
       const r = await api('/ai/analyze', { method: 'POST', form: body });
@@ -73,7 +92,8 @@ export default function Capture() {
         setImageUrl(err.body.imageUrl);
         setAnalysis(null);
         setAiNote(err.message);
-        setForm((f) => ({ ...f, title: f.title || 'Site material' }));
+        // never pre-select a material the AI didn't suggest
+        setForm((f) => ({ ...f, title: f.title || 'Site material', materialType: '' }));
         setEstimate(null);
       } else {
         setError(err.message);
@@ -218,8 +238,14 @@ export default function Capture() {
 
           <div className="space-y-5">
             {form.materialType && <SalvageTag material={form.materialType} title={form.title} quantityKg={Number(quantityKg) || 0} conditionScore={form.conditionScore} conditionLabel={estimate?.conditionLabel} price={price?.price}>
-              {price && <p className="mt-1 text-sm">Likely range {inr(price.low)} to {inr(price.high)} ({inr(price.per_kg)}/kg, {price.model} model)</p>}
+              {price && <p className="mt-1 text-sm">Likely range {inr(price.low)} to {inr(price.high)} ({inr(price.per_kg)}/kg, {price.model === 'backend-fallback' ? 'built-in price index' : `${price.model} model`})</p>}
             </SalvageTag>}
+            {!form.materialType && (
+              <div className="panel p-5">
+                <p className="font-semibold">Choose the material below</p>
+                <p className="mt-1 text-sm text-graphite-600">The price estimate and suggested action appear once you pick what this is.</p>
+              </div>
+            )}
 
             {rec && (
               <div className="panel p-4">

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": [
+    "bom1"
+  ],
+  "functions": {
+    "main.py": {
+      "excludeFiles": "{training/**,tests/**,.venv/**,**/__pycache__/**,weights/*.pt,*.csv,TRAINING.md,seed_synthetic_trades.py,train_price.py}"
+    }
+  }
+}

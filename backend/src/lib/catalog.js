@@ -46,7 +46,7 @@ function fallbackRecommendation(materialType, conditionScore, quantityKg) {
   if (conditionScore >= 60) action = 'Sell';
   else if (m.recyclability >= 0.5 || conditionScore >= 35) action = 'Recycle';
   return {
-    action, scores: {}, reasons: ['AI service unavailable - simple rule used (condition and recyclability)'],
+    action, scores: {}, reasons: ['Based on condition and how recyclable the material is (built-in rules)'],
     co2_saved_kg: co2Saved(materialType, quantityKg, action),
     landfill_diverted_kg: action === 'Dispose' ? 0 : quantityKg, model: 'backend-fallback',
   };

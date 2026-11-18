@@ -14,6 +14,9 @@ const config = {
   aiDisabled: ['off', 'none', 'disabled'].includes(String(process.env.AI_SERVICE_URL || '').trim().toLowerCase()),
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim()),
   uploadDir: process.env.UPLOAD_DIR || require('path').join(__dirname, '..', 'uploads'),
+  // where photos go when Cloudinary isn't configured: 'local' disk (dev) or 'db' (MongoDB).
+  // Hosts without a lasting disk (production, Vercel) default to 'db'.
+  imageStore: process.env.IMAGE_STORE || (isProd || process.env.VERCEL ? 'db' : 'local'),
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
     model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
