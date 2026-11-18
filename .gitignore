@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+backend/uploads/*
+!backend/uploads/.gitkeep
+__pycache__/
+.pytest_cache/
+.venv/
+ai-service/weights/*
+!ai-service/weights/.gitkeep
+*.csv
+runs/
+.DS_Store
+ai-service/training/data/
+*.zip
+backend/.env.*
+!backend/.env.example
