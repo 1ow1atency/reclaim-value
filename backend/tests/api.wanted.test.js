@@ -66,6 +66,14 @@ d('Wanted alerts', () => {
     expect(demand.body.total).toBe(1);
     expect(demand.body.items[0].inRange).toBe(true);
     expect(demand.body.items[0].buyer).toBeUndefined(); // identity hidden
+
+    // the assistant answers "buyer demand" questions from the alerts, not from listings
+    const asked = await request(app).post('/api/ai/agent').set(auth('company')).send({ message: 'Is there any buyer demand for bricks?' }).expect(200);
+    expect(asked.body.intent.tool).toBe('buyer_demand');
+    expect(asked.body.reply).toMatch(/1 open buyer alert for bricks/);
+    expect(asked.body.reply).not.toMatch(/Rahul|@/); // no buyer identity
+    const none = await request(app).post('/api/ai/agent').set(auth('company')).send({ message: 'Is there any buyer demand for glass?' }).expect(200);
+    expect(none.body.reply).toMatch(/No buyers have posted/);
   });
 
   test('publishing a matching listing notifies the buyer once; non-matching ones do not', async () => {

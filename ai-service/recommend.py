@@ -43,7 +43,10 @@ def recommend(material: str, condition_score: float, quantity_kg: float = 100.0,
 
     reasons = []
     if action in ("Reuse", "Sell"):
-        reasons.append(f"condition {condition_score:.0f}/100 is good enough for another use")
+        if condition_score >= 50:
+            reasons.append(f"condition {condition_score:.0f}/100 is good enough for another use")
+        else:
+            reasons.append(f"condition {condition_score:.0f}/100 is low, but it can still sell as a discounted lot")
     if action == "Sell":
         reasons.append(f"market demand for {info['label'].lower()} is "
                        f"{'high' if demand > 0.65 else 'moderate'}")

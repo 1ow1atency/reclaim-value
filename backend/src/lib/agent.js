@@ -6,7 +6,9 @@
 const ai = require('./aiClient');
 const gemini = require('./gemini');
 const guide = require('./guide');
-const { Material, Listing, Request } = require('../models');
+const { Material, Listing, Request, Wanted } = require('../models');
+const { describeWanted } = require('./wanted');
+const { haversineKm } = require('./geo');
 const { MATERIALS } = require('./catalog');
 const { searchListings } = require('./search');
 const { summaryFor } = require('./impact');
@@ -16,10 +18,10 @@ const kg = (n) => (n >= 1000 ? `${(n / 1000).toLocaleString('en-IN', { maximumFr
 const label = (m) => MATERIALS[m]?.label.toLowerCase() || 'material';
 
 const ROLE_TOOLS = {
-  Company: ['list_inventory', 'list_my_listings', 'list_requests', 'impact_summary', 'estimate_price', 'recommend_action', 'search_listings'],
+  Company: ['list_inventory', 'list_my_listings', 'list_requests', 'impact_summary', 'estimate_price', 'recommend_action', 'search_listings', 'buyer_demand'],
   Buyer: ['search_listings', 'list_requests', 'impact_summary', 'estimate_price'],
   Recycler: ['search_listings', 'list_requests', 'impact_summary', 'estimate_price', 'recommend_action'],
-  Admin: ['impact_summary', 'search_listings', 'estimate_price', 'recommend_action'],
+  Admin: ['impact_summary', 'search_listings', 'estimate_price', 'recommend_action', 'buyer_demand'],
 };
 
 const TOOLS = {
@@ -46,10 +48,35 @@ const TOOLS = {
   async list_my_listings(args, user) {
     const q = { seller: user._id, status: { $in: ['active', 'reserved'] } };
     if (args.material) q.materialType = args.material;
-    const items = await Listing.find(q).sort({ createdAt: -1 }).limit(20).lean();
+    const [items, total] = await Promise.all([
+      Listing.find(q).sort({ createdAt: -1 }).limit(20).lean(),
+      Listing.countDocuments(q),
+    ]);
     if (!items.length) return { reply: 'You have no live listings. Publish one from **Inventory**.', data: { type: 'listings', items } };
-    const lines = items.slice(0, 8).map((l) => `• **${l.title}** - ${inr(l.price)} (${l.status})`);
-    return { reply: `${items.length} live listing${items.length > 1 ? 's' : ''}:\n${lines.join('\n')}`, data: { type: 'listings', items } };
+    const shown = items.slice(0, 8);
+    const lines = shown.map((l) => `• **${l.title}** - ${inr(l.price)} (${l.status})`);
+    const more = total > shown.length ? `\n…and ${total - shown.length} more. Open **Listings** to see them all.` : '';
+    return { reply: `${total} live listing${total > 1 ? 's' : ''}${total > shown.length ? ` (showing the newest ${shown.length})` : ''}:\n${lines.join('\n')}${more}`, data: { type: 'listings', items } };
+  },
+
+  // What buyers have asked for (Wanted alerts). Buyer identity stays hidden.
+  async buyer_demand(args, user) {
+    const q = { active: true };
+    if (args.material) q.materialType = args.material;
+    const rows = await Wanted.find(q).sort({ createdAt: -1 }).limit(200)
+      .populate('buyer', 'suspended').lean();
+    const items = rows.filter((w) => w.buyer && !w.buyer.suspended)
+      .map((w) => ({ w, km: haversineKm(user.location, w.location) }))
+      .sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
+    const what = args.material ? ` for ${label(args.material)}` : '';
+    if (!items.length) {
+      return { reply: `No buyers have posted a wanted alert${what} yet. Check **Buyer demand** later, since new alerts appear there.`, data: { type: 'demand', items: [] } };
+    }
+    const lines = items.slice(0, 5).map(({ w, km }) => `• ${describeWanted(w)}${km != null ? ` (${Math.round(km)} km from you)` : ''}`);
+    return {
+      reply: `${items.length} open buyer alert${items.length > 1 ? 's' : ''}${what}:\n${lines.join('\n')}\nOpen **Buyer demand** for the full list.`,
+      data: { type: 'demand', items: items.map((x) => x.w) },
+    };
   },
 
   async list_requests(_args, user) {
@@ -86,12 +113,17 @@ const TOOLS = {
     const qty = args.min_quantity_kg || 100;
     const cond = /cracked|broken|rusty|damaged|old|poor/.test(args._text || '') ? 30 : (args.min_condition ?? 60);
     const r = await ai.recommend({ material: args.material, condition_score: cond, quantity_kg: qty });
+    const why = (r.reasons || []).join('; ');
+    const ranked = Object.entries(r.scores || {}).sort((a, b) => b[1] - a[1]);
+    const second = ranked[1] && ranked[0][1] - ranked[1][1] < 0.1 ? ` **${ranked[1][0]}** is a close second, so check both prices.` : '';
     return {
-      reply: `For ${kg(qty)} of ${label(args.material)} at condition ~${cond}/100 I'd suggest **${r.action}**. ${r.reasons?.join('; ') || ''}. Estimated CO₂ saving: ${kg(r.co2_saved_kg || 0)}.`,
+      reply: `For ${kg(qty)} of ${label(args.material)} at condition ~${cond}/100 I'd suggest **${r.action}**.${why ? ` ${why.charAt(0).toUpperCase()}${why.slice(1)}.` : ''}${second} Estimated CO₂ saving: ${kg(r.co2_saved_kg || 0)}.`,
       data: { type: 'recommendation', value: r },
     };
   },
 };
+
+const DEMAND_RE = /\b(buyer demand|demand for|who (wants|needs|is looking|is buying)|wanted (alerts?|requests?)|open demand|buyers? (want|need|are looking|is looking))\b/i;
 
 async function answerGeneral(message, history, user) {
   const entry = guide.findAnswer(message);
@@ -111,6 +143,9 @@ async function runAgent({ message, history = [], user }) {
   const intent = await ai.agent(message);
   if (intent.intent === 'greeting') {
     return { reply: `Hi ${user.name.split(' ')[0]}! ${guide.ENTRIES.find((e) => e.id === 'assistant').answer}`, source: 'guide', intent };
+  }
+  if (DEMAND_RE.test(message) && ROLE_TOOLS[user.role]?.includes('buyer_demand')) {
+    intent.tool = 'buyer_demand';
   }
   if (intent.tool) {
     if (!ROLE_TOOLS[user.role]?.includes(intent.tool)) {
